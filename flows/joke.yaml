@@ -1,0 +1,92 @@
+# joke.yaml - the CamOn joke conversation.
+#
+# Run it with:   python cam_on.py --flow joke     (the default)
+#
+# How a flow works
+#   start:        the step a conversation begins with when a face is seen.
+#   steps:        each step does ONE of these, then goes to `next`
+#                 (no `next` = the conversation ends):
+#     say:        speak fixed text.
+#     ask:        speak a question and listen (also while it's still talking), then
+#                   save_as: NAME   keep the reply as {NAME} for later steps
+#                                   (default: text used if nothing was heard), and/or
+#                   classify:       let the model pick one label for the reply; each label
+#                                   has `means:` (a description for the model) and `next:`.
+#                                   If nothing is heard, or the model's answer isn't one of
+#                                   the labels, the LAST label is used.
+#     generate:   have the model write text from `system` + `prompt` and speak it.
+#                 Optional: temperature (default 0.9), max_tokens (default 150),
+#                 fallback (spoken if the model fails), save_as.
+#   easter_eggs:  checked on every reply; if one matches, its line is spoken and the
+#                 same question is asked again. `match` is a regex or list of regexes
+#                 (use 'single quotes' so backslashes like \b are kept).
+#   on_error:     spoken if something goes wrong mid-conversation.
+#
+# Text can use {variables}: {name}, {version} and {author} (from cam_on.py, unless this
+# file sets name:/version:/author: at the top level), plus anything saved with save_as.
+
+start: offer
+
+easter_eggs:
+  - match: ['\bversion\b', '\bwho\s+(made|created|built|wrote|programmed|designed)\s+you\b']
+    say: "{name} Version {version}, made by {author}."
+
+on_error: "Oops, my joke circuits just blew a fuse. Try again in a moment."
+
+steps:
+  offer:
+    ask: "Hi there! Do you want to hear a joke?"
+    classify:
+      yes:
+        means: "they accepted, including 'sure', 'go on then', 'why not'"
+        next: get_topic
+      no:
+        means: "they declined, including 'not now', 'no thanks'"
+        next: roast
+      unclear:
+        means: "unrelated, unintelligible, or truly undecided"
+        next: offer_again
+
+  offer_again:
+    ask: "Sorry, I didn't catch that. Yes or no: do you want to hear a joke?"
+    classify:
+      yes:
+        means: "they accepted"
+        next: get_topic
+      no:
+        means: "they declined"
+        next: roast
+      unclear:
+        means: "anything else"
+        next: goodbye
+
+  get_topic:
+    ask: "Great! What do you want to hear a joke about?"
+    save_as: topic
+    default: anything
+    next: joke
+
+  joke:
+    generate:
+      system: >-
+        You are a stand-up comedian speaking out loud to someone in front of you.
+        Reply with exactly one short, clean, genuinely funny joke (one to three sentences)
+        that will be read aloud by a text-to-speech voice. No preamble, no explanation,
+        no emojis, no markdown, no stage directions.
+      prompt: "Tell me a joke about {topic}."
+      fallback: "I tried to think of one, but my brain is buffering. Ask me again later!"
+
+  roast:
+    generate:
+      system: >-
+        You are a cheeky robot comedian. The person in front of you just refused to hear
+        one of your jokes. Reply with exactly one short, witty, good-natured roast (one or two
+        sentences) teasing them for turning down a joke. Keep it PG and playful: never mention
+        their appearance, body, age, gender, race, religion, disability or anything personal.
+        No preamble, no emojis, no markdown.
+      prompt: "They said no to hearing a joke."
+      temperature: 1.0
+      fallback: "No joke? Fine. Your loss, my material."
+
+  goodbye:
+    say: "Okay, maybe next time!"

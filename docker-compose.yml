@@ -1,0 +1,89 @@
+# docker-compose.yml - CamOn and its Qwen3.6 vLLM server on the DGX Spark.
+# Put this file in ~/CamOn (next to cam_on.py, flows/ and docker/Dockerfile).
+#
+#   docker compose up -d --build      # first start builds CamOn's image; vLLM can take minutes to load
+#   docker compose logs -f camon      # watch the conversation log
+#   docker compose ps                 # vllm-qwen shows "healthy" once the model is loaded
+#   docker compose down               # stop both
+#
+# Before the first start, download the model into your Hugging Face cache
+# (~/.cache/huggingface, mounted into the vLLM container below):
+#   pip install -U huggingface_hub && hf download nvidia/Qwen3.6-35B-A3B-NVFP4
+# Otherwise vLLM downloads it on first start, which can outlast the health check's
+# 20-minute start-up allowance and stop CamOn from starting.
+#
+# CamOn waits until vLLM reports healthy before it starts.
+# Audio uses your desktop's PipeWire session, so the A1 speaker and the microphone are
+# whatever is set as default output/input on the Spark (Settings -> Sound).
+
+services:
+  vllm-qwen:
+    image: vllm/vllm-openai:nightly
+    container_name: vllm-qwen36
+    ports:
+      - "8000:8000"
+    volumes:
+      - ~/.cache/huggingface:/root/.cache/huggingface
+    environment:
+      - HF_HOME=/root/.cache/huggingface
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      # 1. Fall back to the stable V0 engine if V1 multiproc worker fails on GB10
+      - VLLM_USE_V1=0
+      # 2. CUDA allocator tweak for Grace/Blackwell unified memory
+      - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+    ipc: host
+    privileged: true
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    command: >
+      nvidia/Qwen3.6-35B-A3B-NVFP4
+      --port 8000
+      --quantization modelopt
+      --max-model-len 32768
+      --gpu-memory-utilization 0.85
+      --trust-remote-code
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=5)"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 20m          # loading the model can take a while; failures don't count until then
+    restart: unless-stopped
+
+  camon:
+    build:
+      context: ./docker
+      args:
+        UID: "1000"              # your user id on the Spark (check with: id -u)
+    image: camon:latest
+    container_name: camon
+    depends_on:
+      vllm-qwen:
+        condition: service_healthy
+    user: "1000:1000"            # same user as you, so PipeWire lets it play and record audio
+    group_add:
+      - video
+    devices:
+      - /dev/video0:/dev/video0  # the BRIO's colour camera (see: v4l2-ctl --list-devices)
+    volumes:
+      - ./:/app                  # cam_on.py, flows/, models and recordings/ stay in ~/CamOn
+      - /run/user/1000/pulse/native:/run/user/1000/pulse/native   # PipeWire audio socket
+      - /tmp/.X11-unix:/tmp/.X11-unix                             # only used for the video window
+    environment:
+      - PULSE_SERVER=unix:/run/user/1000/pulse/native
+      - DISPLAY=${DISPLAY:-:0}
+    command: >
+      python cam_on.py
+      --llm-url http://vllm-qwen:8000/v1
+      --camera 0
+      --no-window
+    # Add any other options to the command above, e.g.:
+    #   --flow history   --record   --voice am_michael   --whisper-model small.en
+    # For the video window: remove --no-window and run `xhost +local:` on the Spark first.
+    restart: unless-stopped

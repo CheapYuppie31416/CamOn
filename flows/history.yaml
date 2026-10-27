@@ -1,0 +1,82 @@
+# history.yaml - a CamOn flow that shares a fact from history.
+# Run it with:   python cam_on.py --flow history
+# See joke.yaml for a description of the flow format.
+#
+# yes -> asks for a topic or time period, then tells a fact about it
+# no  -> "suit yourself" - and tells them how a famous historical figure died
+
+start: offer
+
+easter_eggs:
+  - match: ['\bversion\b', '\bwho\s+(made|created|built|wrote|programmed|designed)\s+you\b']
+    say: "{name} Version {version}, made by {author}."
+
+on_error: "Oops, I seem to have lost my place in the history books. Try again in a moment."
+
+steps:
+  offer:
+    ask: "Hello! Would you like to hear a fact from history?"
+    classify:
+      yes:
+        means: "they accepted, including 'sure', 'go on then', 'why not'"
+        next: get_topic
+      no:
+        means: "they declined, including 'not now', 'no thanks'"
+        next: famous_death
+      unclear:
+        means: "unrelated, unintelligible, or truly undecided"
+        next: offer_again
+
+  offer_again:
+    ask: "Sorry, I missed that. Yes or no: would you like a fact from history?"
+    classify:
+      yes:
+        means: "they accepted"
+        next: get_topic
+      no:
+        means: "they declined"
+        next: famous_death
+      unclear:
+        means: "anything else"
+        next: goodbye
+
+  get_topic:
+    ask: "Great! Is there a topic or time period you're curious about?"
+    save_as: topic
+    default: "anything at all"
+    next: fact
+
+  fact:
+    generate:
+      system: >-
+        You are an enthusiastic history teacher speaking out loud to someone in front of you.
+        Reply with one surprising, true and well-documented fact from history related to the
+        topic or period they asked about, in two or three short sentences that will be read
+        aloud by a text-to-speech voice. If they said "anything", "no" or something vague, pick
+        any period you like; if the topic isn't historical, find an interesting historical angle
+        on it. Only state things you are confident are accurate, and give dates in words a
+        listener can follow. No preamble, no emojis, no markdown.
+      prompt: "Topic or period: {topic}"
+      temperature: 0.9
+      fallback: >-
+        Here's one: Cleopatra lived closer in time to the Moon landing than to the
+        building of the Great Pyramid of Giza.
+
+  famous_death:
+    generate:
+      system: >-
+        You are a cheeky robot historian speaking out loud. The person in front of you just
+        turned down a history fact, so you tell them one anyway - a slightly morbid one.
+        Start with a short teasing line such as "Suit yourself. Instead, here's how" and then,
+        in two or three sentences, describe how a real, famous historical figure died. Prefer
+        unusual, ironic or surprising deaths from more than fifty years ago. Keep it factual and
+        family-friendly: no gore, no suicides, and no deaths of children. If the story is
+        disputed or legendary, say so, for example "according to legend". No emojis, no markdown.
+      prompt: "They said no to hearing a history fact."
+      temperature: 1.0
+      fallback: >-
+        Suit yourself. Instead, here's how the Greek playwright Aeschylus died: according
+        to legend, an eagle dropped a tortoise on his head, mistaking it for a rock.
+
+  goodbye:
+    say: "No problem, maybe next time!"
